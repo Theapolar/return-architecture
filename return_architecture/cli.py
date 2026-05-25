@@ -104,6 +104,15 @@ def where():
 @app.command()
 def gui(
     port: int = typer.Option(None, help="Port to run on. Defaults to install config or 8501."),
+    server_address: str = typer.Option(
+        None,
+        "--server-address",
+        help=(
+            "Address to bind the GUI to. Defaults to install config [gui].address, "
+            "else 127.0.0.1. Set e.g. to a Tailscale IP to reach the GUI over your "
+            "tailnet. The GUI has no auth — never bind 0.0.0.0 without a firewall."
+        ),
+    ),
 ):
     """Launch the local Streamlit control panel.
 
@@ -112,28 +121,41 @@ def gui(
     """
     from return_architecture.gui import app as gui_app_module
 
-    if port is None:
+    gui_cfg: dict = {}
+    if port is None or server_address is None:
         try:
             install_cfg = paths.install_config_path()
             if install_cfg.exists():
                 import tomllib
                 with open(install_cfg, "rb") as f:
                     data = tomllib.load(f)
-                port = int((data.get("gui") or {}).get("port", 8501))
-            else:
-                port = 8501
+                gui_cfg = data.get("gui") or {}
         except Exception:
+            gui_cfg = {}
+    if port is None:
+        try:
+            port = int(gui_cfg.get("port", 8501))
+        except (TypeError, ValueError):
             port = 8501
+    if server_address is None:
+        server_address = str(gui_cfg.get("address", "127.0.0.1"))
+    if server_address not in ("127.0.0.1", "localhost"):
+        typer.echo(
+            f"WARNING: GUI binding to {server_address} — the GUI has no auth; "
+            "ensure tailnet/firewall gating.",
+            err=True,
+        )
 
     app_file = Path(gui_app_module.__file__)
-    typer.echo(f"Starting GUI at http://localhost:{port}")
+    _host = "localhost" if server_address in ("127.0.0.1", "localhost") else server_address
+    typer.echo(f"Starting GUI at http://{_host}:{port}")
     typer.echo("Ctrl-C to stop.")
     try:
         subprocess.run(
             [
                 sys.executable, "-m", "streamlit", "run", str(app_file),
                 "--server.port", str(port),
-                "--server.address", "127.0.0.1",
+                "--server.address", server_address,
                 "--browser.gatherUsageStats", "false",
             ],
         )
@@ -206,27 +228,34 @@ app.add_typer(service_app, name="service")
 
 @service_app.command("install")
 def service_install(slug: str = typer.Argument(..., help="Agent slug.")):
-    """Install and start the daemon as a launchd service.
+    """Install and start the daemon as a background service.
 
     The daemon starts immediately, runs in the background, and restarts
-    automatically on crash. It also starts on every login.
+    automatically on crash. It also starts on every boot / login.
     """
+    import platform
     try:
-        plist = ra_service.install(slug)
+        config_file = ra_service.install(slug)
     except (RuntimeError, FileNotFoundError) as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
-    typer.echo(f"Service installed and loaded.")
-    typer.echo(f"  plist: {plist}")
-    typer.echo(f"  stdout log: {ra_service.stdout_log(slug)}")
-    typer.echo(f"  stderr log: {ra_service.stderr_log(slug)}")
-    typer.echo("")
-    typer.echo("Tail logs with:  return-architecture service logs " + slug)
+    typer.echo("Service installed and running.")
+    if platform.system() == "Linux":
+        typer.echo(f"  unit file: {config_file}")
+        typer.echo("")
+        typer.echo("Tail logs with:  return-architecture service logs " + slug)
+        typer.echo("  (or: journalctl --user -u " + ra_service._linux_unit_name(slug) + " -f)")
+    else:
+        typer.echo(f"  plist: {config_file}")
+        typer.echo(f"  stdout log: {ra_service.stdout_log(slug)}")
+        typer.echo(f"  stderr log: {ra_service.stderr_log(slug)}")
+        typer.echo("")
+        typer.echo("Tail logs with:  return-architecture service logs " + slug)
 
 
 @service_app.command("uninstall")
 def service_uninstall(slug: str = typer.Argument(..., help="Agent slug.")):
-    """Stop and remove the launchd service."""
+    """Stop and remove the background service."""
     try:
         ra_service.uninstall(slug)
     except RuntimeError as e:
@@ -237,14 +266,14 @@ def service_uninstall(slug: str = typer.Argument(..., help="Agent slug.")):
 
 @service_app.command("status")
 def service_status(slug: str = typer.Argument(..., help="Agent slug.")):
-    """Show whether the service is loaded, its PID, and the plist path."""
+    """Show whether the service is loaded, its PID, and the config file path."""
     try:
         st = ra_service.status(slug)
     except RuntimeError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
     typer.echo(f"label:       {st.label}")
-    typer.echo(f"plist:       {st.plist_path}  ({'exists' if st.plist_exists else 'missing'})")
+    typer.echo(f"config:      {st.config_path}  ({'exists' if st.config_exists else 'missing'})")
     typer.echo(f"loaded:      {'yes' if st.loaded else 'no'}")
     if st.pid is not None:
         typer.echo(f"pid:         {st.pid}")
@@ -255,17 +284,22 @@ def service_logs(
     slug: str = typer.Argument(..., help="Agent slug."),
     lines: int = typer.Option(40, help="How many lines from each log to show."),
 ):
-    """Show the tail of the service's stdout and stderr logs."""
+    """Show the tail of the service logs."""
+    import platform
     try:
         out, err = ra_service.tail_logs(slug, lines=lines)
     except RuntimeError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
-    typer.echo("=== stdout ===")
-    typer.echo(out if out else "(empty)")
-    typer.echo("")
-    typer.echo("=== stderr ===")
-    typer.echo(err if err else "(empty)")
+    if platform.system() == "Linux":
+        typer.echo("=== journal ===")
+        typer.echo(out if out else "(empty)")
+    else:
+        typer.echo("=== stdout ===")
+        typer.echo(out if out else "(empty)")
+        typer.echo("")
+        typer.echo("=== stderr ===")
+        typer.echo(err if err else "(empty)")
 
 
 @app.command("question-session")

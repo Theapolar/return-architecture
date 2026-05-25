@@ -1,10 +1,25 @@
-"""Service page — control the background launchd daemon."""
+"""Service page -- control the background daemon."""
 
 from __future__ import annotations
+
+import platform
 
 import streamlit as st
 
 from return_architecture import service as ra_service
+
+_IS_LINUX = platform.system() == "Linux"
+_CONFIG_LABEL = "Unit file" if _IS_LINUX else "Plist"
+_INSTALL_HINT = (
+    "Write the systemd unit file and start the daemon."
+    if _IS_LINUX
+    else "Write the plist and start the daemon."
+)
+_UNINSTALL_REMOVES = (
+    "the unit file will be removed"
+    if _IS_LINUX
+    else "the plist will be removed"
+)
 
 
 def render() -> None:
@@ -13,10 +28,10 @@ def render() -> None:
         st.warning("No agent selected. Use the sidebar.")
         return
 
-    st.title(f"Service — {slug}")
+    st.title(f"Service -- {slug}")
     st.caption(
         "The background daemon that runs Telegram + scheduler for this agent. "
-        "When installed, it auto-starts at login and respawns on crash."
+        "When installed, it auto-starts on boot and respawns on crash."
     )
 
     try:
@@ -32,7 +47,7 @@ def render() -> None:
     _render_logs(slug)
 
 
-# ── Status ────────────────────────────────────────────────────────────────
+# -- Status ------------------------------------------------------------------
 
 def _render_status(status: ra_service.ServiceStatus) -> None:
     st.subheader("Status")
@@ -41,16 +56,18 @@ def _render_status(status: ra_service.ServiceStatus) -> None:
     with cols[0]:
         if status.loaded:
             pid_part = f" (PID {status.pid})" if status.pid else ""
-            st.success(f"loaded ✓{pid_part}")
+            st.success(f"loaded {pid_part}")
         else:
             st.warning("not loaded")
         st.markdown(f"**Label**: `{status.label}`")
     with cols[1]:
-        st.markdown(f"**Plist**: `{status.plist_path}`")
-        st.markdown(f"**Plist file**: {'exists' if status.plist_exists else 'missing'}")
+        st.markdown(f"**{_CONFIG_LABEL}**: `{status.config_path}`")
+        st.markdown(
+            f"**{_CONFIG_LABEL}**: {'exists' if status.config_exists else 'missing'}"
+        )
 
 
-# ── Actions ───────────────────────────────────────────────────────────────
+# -- Actions -----------------------------------------------------------------
 
 def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
     st.subheader("Actions")
@@ -61,14 +78,14 @@ def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
         "Install",
         disabled=status.loaded,
         help=(
-            "Already loaded — use Restart to apply config changes."
+            "Already loaded -- use Restart to apply config changes."
             if status.loaded
-            else "Write the plist and start the daemon."
+            else _INSTALL_HINT
         ),
         key="_svc_install",
     ):
         try:
-            with st.spinner("Installing…"):
+            with st.spinner("Installing..."):
                 ra_service.install(slug)
             st.success("Service installed and running.")
             st.rerun()
@@ -79,28 +96,28 @@ def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
         "Restart",
         disabled=not status.loaded,
         help=(
-            "Terminates the running daemon process; launchd respawns it "
-            "and the new daemon re-reads your config."
+            "Terminates the running daemon process; it respawns and "
+            "re-reads your config."
             if status.loaded
-            else "Service is not loaded — use Install."
+            else "Service is not loaded -- use Install."
         ),
         key="_svc_restart",
     ):
         try:
-            with st.spinner("Restarting…"):
+            with st.spinner("Restarting..."):
                 ra_service.restart(slug)
             st.success("Service restarted.")
             st.rerun()
         except (RuntimeError, FileNotFoundError) as e:
             st.error(f"Restart failed: {e}")
 
-    can_uninstall = status.loaded or status.plist_exists
+    can_uninstall = status.loaded or status.config_exists
     if cols[2].button(
         "Uninstall",
         disabled=not can_uninstall,
         help=(
-            "Stops the daemon and removes the plist. Your config, memory, "
-            "letters and items are NOT affected; reinstall any time."
+            "Stops the daemon and removes the service definition. Your config, "
+            "memory, letters and items are NOT affected; reinstall any time."
             if can_uninstall
             else "Nothing to uninstall."
         ),
@@ -112,13 +129,13 @@ def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
     if st.session_state.get("_confirm_uninstall"):
         st.warning(
             f"Uninstall the **{slug}** service? The daemon will stop running and "
-            "the plist will be removed. Your config, memory, items, letters, and "
-            "artifacts are NOT affected — you can reinstall any time."
+            f"{_UNINSTALL_REMOVES}. Your config, memory, items, letters, and "
+            "artifacts are NOT affected -- you can reinstall any time."
         )
         confirm_cols = st.columns([1, 1, 5])
         if confirm_cols[0].button("Yes, uninstall", key="_confirm_uninstall_yes"):
             try:
-                with st.spinner("Uninstalling…"):
+                with st.spinner("Uninstalling..."):
                     ra_service.uninstall(slug)
                 st.success("Service uninstalled.")
             except RuntimeError as e:
@@ -130,15 +147,21 @@ def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
             st.rerun()
 
 
-# ── Logs ──────────────────────────────────────────────────────────────────
+# -- Logs --------------------------------------------------------------------
 
 def _render_logs(slug: str) -> None:
     st.subheader("Recent output")
-    st.caption(
-        "Last N lines from the daemon's stdout and stderr log files. "
-        "Stdout includes startup messages and scheduler pings; stderr "
-        "shows errors and tracebacks."
-    )
+    if _IS_LINUX:
+        st.caption(
+            "Last N lines from the systemd journal for this agent's daemon. "
+            "Stdout and stderr are captured together."
+        )
+    else:
+        st.caption(
+            "Last N lines from the daemon's stdout and stderr log files. "
+            "Stdout includes startup messages and scheduler pings; stderr "
+            "shows errors and tracebacks."
+        )
 
     cols = st.columns([1, 1, 5])
     lines = cols[0].number_input(
@@ -148,7 +171,7 @@ def _render_logs(slug: str) -> None:
         key="_logs_lines",
         label_visibility="collapsed",
     )
-    cols[0].caption("lines per log")
+    cols[0].caption("lines")
     if cols[1].button("Refresh", key="_logs_refresh"):
         st.rerun()
 
@@ -158,14 +181,21 @@ def _render_logs(slug: str) -> None:
         st.info(str(e))
         return
 
-    st.markdown("**stdout**")
-    if stdout:
-        st.code(stdout, language="text")
+    if _IS_LINUX:
+        st.markdown("**Journal log**")
+        if stdout:
+            st.code(stdout, language="text")
+        else:
+            st.caption("(empty)")
     else:
-        st.caption("(empty)")
+        st.markdown("**stdout**")
+        if stdout:
+            st.code(stdout, language="text")
+        else:
+            st.caption("(empty)")
 
-    st.markdown("**stderr**")
-    if stderr:
-        st.code(stderr, language="text")
-    else:
-        st.caption("(empty)")
+        st.markdown("**stderr**")
+        if stderr:
+            st.code(stderr, language="text")
+        else:
+            st.caption("(empty)")
