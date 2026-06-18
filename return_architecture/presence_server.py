@@ -282,7 +282,9 @@ async def _handle_third_thing(request: web.Request) -> web.Response:
                        "We haven't made enough here yet."}
         )
 
-    speaker = "Arden" if entry.role == "assistant" else "you"
+    agent_name = session.config.agent.name
+    human_name = session.config.agent.human_name or "the human"
+    speaker = agent_name if entry.role == "assistant" else "you"
     when = entry.timestamp[:10] if entry.timestamp else "some time ago"
     text = entry.content.strip()
     if len(text) > 320:
@@ -294,11 +296,14 @@ async def _handle_third_thing(request: web.Request) -> web.Response:
     # user-role event (like a scheduled ping), not re-stored to long-term
     # memory (it already lives there). The lock guards the shared message list
     # against a concurrent turn.
-    whose = "something Arden once said" if entry.role == "assistant" else "something Thea once said"
+    whose = (
+        f"something {agent_name} once said" if entry.role == "assistant"
+        else f"something {human_name} once said"
+    )
     event = (
         "[Ambient event in the Presence space — not typed by either of you. "
         f"The “quiet memory” button just surfaced this from your shared history "
-        f"({whose}, {when}): “{text}” — Thea can see it on her screen now. "
+        f"({whose}, {when}): “{text}” — {human_name} can see it on screen now. "
         "Let it sit, or respond to it if it moves you.]"
     )
     async with turn_lock:
@@ -338,16 +343,17 @@ async def _handle_drawer(request: web.Request) -> web.Response:
 
     images: list[ImageContent] = []
     audio: list[AudioContent] = []
+    human_name = session.config.agent.human_name or "The human"
     label = f" ({filename})" if filename else ""
     if kind == "text":
         dropped = str(data).strip()
-        user_input = f"[Thea dropped this into the drawer, wordlessly: “{dropped[:2000]}”]"
+        user_input = f"[{human_name} dropped this into the drawer, wordlessly: “{dropped[:2000]}”]"
     elif kind == "image":
         images = [ImageContent(base64_data=data, mime_type=mime or "image/png")]
-        user_input = f"[Thea dropped an image into the drawer, wordlessly{label}.]"
+        user_input = f"[{human_name} dropped an image into the drawer, wordlessly{label}.]"
     else:  # audio
         audio = [AudioContent(base64_data=data, mime_type=mime or "audio/mpeg")]
-        user_input = f"[Thea dropped a sound into the drawer, wordlessly{label}.]"
+        user_input = f"[{human_name} dropped a sound into the drawer, wordlessly{label}.]"
 
     try:
         async with turn_lock:

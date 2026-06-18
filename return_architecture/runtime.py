@@ -41,6 +41,33 @@ from return_architecture.tools.mcp_proxy import MCPProxyTool
 # behavior.max_tool_loops (e.g. higher for agents that edit multiple files).
 MAX_TOOL_LOOPS = 8
 MEMORY_RECALL_TOP_K = 5
+MALFORMED_RETRY_LIMIT = 3
+
+
+def _is_malformed_empty(resp) -> bool:
+    """Gemini sometimes returns MALFORMED_FUNCTION_CALL: no text and no
+    parseable tool call — an empty turn the runtime would otherwise treat as
+    silence. It's transient, so retrying the same call usually succeeds."""
+    return (
+        "MALFORMED_FUNCTION_CALL" in (resp.stop_reason or "")
+        and not resp.text
+        and not resp.tool_calls
+    )
+
+
+def _complete(session: "AgentSession", **kwargs):
+    """provider.complete with a retry on a malformed-empty response, before
+    the junk turn is appended to history (so the conversation stays clean)."""
+    resp = session.provider.complete(**kwargs)
+    attempts = 0
+    while _is_malformed_empty(resp) and attempts < MALFORMED_RETRY_LIMIT:
+        attempts += 1
+        ralog.log_event(session.slug, "malformed_function_call_retry", {
+            "attempt": attempts,
+            "stop_reason": resp.stop_reason,
+        })
+        resp = session.provider.complete(**kwargs)
+    return resp
 
 
 @dataclass
@@ -104,6 +131,39 @@ def build_session(slug: str) -> AgentSession:
         messages=seeded_messages,
         mcp_servers=mcp_servers,
     )
+
+
+def _window_messages(
+    messages: list[Message], max_messages: int
+) -> list[Message]:
+    """Return the tail of the conversation to send to the provider, capped at
+    ``max_messages``, without splitting a tool-call/result group.
+
+    The live ``session.messages`` grows for the whole lifetime of the daemon and
+    is re-sent in full on every API call, so input cost climbs without bound.
+    This caps it. Older turns drop out of the *sent* context only — they remain
+    in memory (recall + seeding carry continuity), and ``session.messages`` is
+    left untouched so nothing in-flight is destroyed mid-turn.
+
+    The window is moved forward to begin on a real human turn (a ``user``
+    message that isn't itself a tool result) so we never open the context on an
+    orphaned tool result or half a tool-call group. The current turn is always
+    at the tail, so it is always included.
+    """
+    if max_messages <= 0 or len(messages) <= max_messages:
+        return messages
+    start = len(messages) - max_messages
+    # Real human turns are the only safe window boundaries: a tool result must
+    # keep the assistant tool-call that produced it, so we can't cut inside a
+    # turn. Snap back to the latest user turn at or before the cut. This may
+    # keep slightly more than max_messages when a single turn is long, but it
+    # never splits a group, never opens on an orphan, and always keeps the turn
+    # in progress. If there's no user turn at all, send everything unchanged.
+    cut = 0
+    for i, m in enumerate(messages):
+        if m.role == "user" and m.tool_call_id is None and i <= start:
+            cut = i
+    return messages[cut:]
 
 
 def _seed_messages_from_memory(
@@ -214,9 +274,12 @@ def turn(
     assistant_text: str | None = None
 
     for _ in range(session.config.behavior.max_tool_loops):
-        resp = session.provider.complete(
+        resp = _complete(
+            session,
             system=augmented_system,
-            messages=session.messages,
+            messages=_window_messages(
+                session.messages, session.config.behavior.max_context_messages
+            ),
             tools=session.tool_schemas(),
             model=session.config.model.name,
             max_tokens=session.config.model.max_tokens,
@@ -299,9 +362,12 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
     assistant_text: str | None = None
 
     for _ in range(session.config.behavior.max_tool_loops):
-        resp = session.provider.complete(
+        resp = _complete(
+            session,
             system=augmented_system,
-            messages=session.messages,
+            messages=_window_messages(
+                session.messages, session.config.behavior.max_context_messages
+            ),
             tools=session.tool_schemas(),
             model=session.config.model.name,
             max_tokens=session.config.model.max_tokens,

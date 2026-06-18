@@ -57,6 +57,10 @@ Provider = Literal["anthropic", "openai", "gemini"]
 class AgentSection(BaseModel):
     name: str
     slug: str
+    # The person this agent is in relationship with. Optional; used where a
+    # channel needs to address or refer to the human by name (e.g. the Presence
+    # app). Falls back to neutral wording when unset.
+    human_name: str | None = None
 
 
 class ModelSection(BaseModel):
@@ -93,6 +97,13 @@ class BehaviorSection(BaseModel):
     # stops with "(stopped: tool loop limit reached)". 8 is fine for chat;
     # raise it for agents that do multi-step work like editing several files.
     max_tool_loops: int = 8
+    # Upper bound on how many recent messages are sent to the provider each
+    # turn. The live conversation otherwise grows for the whole lifetime of the
+    # daemon and the *entire* transcript is re-sent on every API call (and every
+    # tool loop), so cost climbs without limit. Windowing caps that: older turns
+    # drop out of the live context but are NOT lost — continuity still comes from
+    # memory recall + seed_chat_history_from_memory. 0 = unlimited (old behavior).
+    max_context_messages: int = 40
 
 
 class ArtifactExchangeSection(BaseModel):
