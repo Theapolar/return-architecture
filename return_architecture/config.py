@@ -93,6 +93,11 @@ class BehaviorSection(BaseModel):
     # stops with "(stopped: tool loop limit reached)". 8 is fine for chat;
     # raise it for agents that do multi-step work like editing several files.
     max_tool_loops: int = 8
+    # Maximum number of messages kept in the live context window. Older
+    # messages are dropped before each API call; they remain in ChromaDB
+    # for semantic recall. 0 disables truncation (unbounded). Default 40
+    # = roughly 20 back-and-forth turns.
+    max_context_messages: int = 40
 
 
 class ArtifactExchangeSection(BaseModel):

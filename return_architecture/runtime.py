@@ -201,6 +201,7 @@ def turn(
     # memory — it shapes the reply, it isn't part of who the agent is.
     if extra_system:
         augmented_system = f"{augmented_system}\n\n---\n\n{extra_system}"
+    _trim_context(session)
     if recalled:
         ralog.log_event(session.slug, "memory_recall", {
             "query": user_input,
@@ -295,6 +296,7 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
     augmented_system = _augment_system_prompt(
         session.base_system_prompt, recalled, pinned=pinned, time_anchor=time_anchor
     )
+    _trim_context(session)
 
     assistant_text: str | None = None
 
@@ -474,6 +476,25 @@ def _augment_system_prompt(
         )
 
     return "\n\n".join(sections)
+
+
+def _trim_context(session: AgentSession) -> None:
+    """Drop old messages so the context window stays bounded.
+
+    Keeps the most recent max_context_messages entries. After slicing,
+    advances past any leading non-user messages so the list always starts
+    with a user turn (avoids an orphaned assistant/tool message at index 0).
+    No-op when max_context_messages is 0.
+    """
+    limit = session.config.behavior.max_context_messages
+    if limit <= 0 or len(session.messages) <= limit:
+        return
+    trimmed = session.messages[-limit:]
+    for i, m in enumerate(trimmed):
+        if m.role == "user":
+            session.messages = trimmed[i:]
+            return
+    session.messages = trimmed
 
 
 def _execute_tool(session: AgentSession, tc: ToolCall) -> ToolResult:
