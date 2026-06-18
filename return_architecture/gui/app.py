@@ -57,6 +57,8 @@ def _main() -> None:
                 key="_agent_select",
             )
             st.session_state["agent_slug"] = selected
+            if st.button("➕ Add another agent", key="_sidebar_add_agent", use_container_width=True):
+                wizard.start_add_agent()
             st.divider()
 
     pages = [

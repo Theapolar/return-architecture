@@ -10,6 +10,7 @@ import streamlit as st
 
 from return_architecture import paths
 from return_architecture.gui import helpers
+from return_architecture.gui.pages import wizard
 
 
 def render() -> None:
@@ -40,3 +41,7 @@ def render() -> None:
         return
     for slug in agents:
         st.write(f"- `{slug}`")
+
+    st.divider()
+    if st.button("➕ Add another agent", key="_home_add_agent", type="primary"):
+        wizard.start_add_agent()

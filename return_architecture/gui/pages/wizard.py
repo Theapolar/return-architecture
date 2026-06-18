@@ -32,8 +32,27 @@ TOTAL_STEPS = 8
 
 # ── Wizard entry / dispatch ───────────────────────────────────────────────
 
+def start_add_agent() -> None:
+    """Re-enter the setup flow to create an *additional* agent.
+
+    Called from the normal GUI (Home page / sidebar) once an install already
+    exists. Jumps straight to the create-agent step — the keys are already set
+    — and runs the same end-to-end flow (system prompt, Telegram, schedules,
+    service) for the new agent. The ``_w_`` prefix means the existing done-step
+    cleanup clears the add-mode flag along with the rest of the wizard state.
+    """
+    for k in list(st.session_state.keys()):
+        if k.startswith("_w_"):
+            st.session_state.pop(k, None)
+    st.session_state.pop("wizard_done", None)
+    st.session_state["_w_add_mode"] = True
+    st.session_state["wizard_step"] = 2
+    st.rerun()
+
+
 def render() -> None:
-    st.title("Welcome to Return Architecture")
+    add_mode = st.session_state.get("_w_add_mode")
+    st.title("Add another agent" if add_mode else "Welcome to Return Architecture")
     step = st.session_state.get("wizard_step", 0)
     st.progress((step + 1) / TOTAL_STEPS, text=f"Step {step + 1} of {TOTAL_STEPS}")
 
@@ -171,9 +190,10 @@ def _step_api_keys() -> None:
 # ── Step 2: Create agent ──────────────────────────────────────────────────
 
 def _step_create_agent() -> None:
+    add_mode = st.session_state.get("_w_add_mode")
     st.subheader("Create your agent")
     existing = helpers.list_agents()
-    if existing:
+    if existing and not add_mode:
         st.info(
             f"You already have agent(s): **{', '.join(existing)}**. "
             "You can skip this step or create another."
@@ -211,23 +231,23 @@ def _step_create_agent() -> None:
         key="_w_provider",
     )
     _default_models = {
-        "anthropic": "claude-opus-4-7",
-        "openai":    "gpt-5",
-        "gemini":    "gemini-2.5-pro",
+        "anthropic": "claude-opus-4-8",
+        "openai":    "gpt-5.4",
+        "gemini":    "gemini-3.1-pro-preview",
     }
     default_model = _default_models.get(provider, "")
     model = st.text_input(
         "Model",
         value=default_model,
         key="_w_model",
-        help="e.g. claude-opus-4-7, claude-sonnet-4-6, gpt-5, gpt-4o, gemini-2.5-pro, gemini-2.5-flash",
+        help="e.g. claude-opus-4-8, claude-sonnet-4-6, gpt-5.4, gemini-3.1-pro-preview, gemini-2.5-flash",
     )
 
     st.divider()
     cols = st.columns([1, 1, 1, 3])
     if cols[0].button("← Back", key="_w_agent_back"):
         _go_back()
-    if existing and cols[1].button("Use existing", key="_w_agent_use_existing"):
+    if existing and not add_mode and cols[1].button("Use existing", key="_w_agent_use_existing"):
         st.session_state["_w_created_slug"] = existing[0]
         _advance()
     if cols[2].button("Create →", type="primary", key="_w_agent_create"):

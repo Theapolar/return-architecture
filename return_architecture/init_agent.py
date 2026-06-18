@@ -70,7 +70,7 @@ def ensure_install_root() -> Path:
 
 def create_agent(slug: str, *, name: str | None = None,
                  provider: str = "anthropic",
-                 model: str = "claude-opus-4-7") -> Path:
+                 model: str = "claude-opus-4-8") -> Path:
     if not slug.replace("-", "").isalnum() or not slug.islower():
         raise ValueError(
             f"Invalid slug '{slug}'. Use lowercase letters, digits, and hyphens only."
