@@ -12,8 +12,6 @@ items) are separate concerns.
 
 from __future__ import annotations
 
-import os
-import random
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -96,27 +94,6 @@ class MemoryStore:
         ]
         entries.sort(key=lambda e: e.timestamp, reverse=True)
         return entries[:limit]
-
-    def random_entry(self) -> MemoryEntry | None:
-        """Return one uniformly-random memory from the whole store, or None
-        if it's empty. Used by the Presence app's "quiet memory" action to
-        surface a real past moment rather than a synthesized one."""
-        count = self._collection.count()
-        if count == 0:
-            return None
-        offset = random.randrange(count)
-        result = self._collection.get(limit=1, offset=offset)
-        docs = result.get("documents") or []
-        metas = result.get("metadatas") or []
-        if not docs:
-            return None
-        meta = metas[0] if metas else {}
-        return MemoryEntry(
-            content=docs[0],
-            role=str(meta.get("role", "")),
-            timestamp=str(meta.get("timestamp", "")),
-            session_id=str(meta.get("session_id", "")),
-        )
 
     def count(self) -> int:
         return self._collection.count()
