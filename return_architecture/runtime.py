@@ -440,12 +440,29 @@ def _pinned_blocks(slug: str) -> str | None:
     session, the latest independent reflection, and the agent's own running
     'where I am now' file, if any exist."""
     blocks = [
+        _load_human_block(slug),
         qs.latest_session_block(slug),
         rr.latest_context_block(slug),
         _load_now_block(slug),
     ]
     present = [b for b in blocks if b]
     return "\n\n".join(present) if present else None
+
+
+def _load_human_block(slug: str) -> str | None:
+    """Read <agent>/human.md if it exists — the living profile of the human:
+    who they are and their north-star. Re-read fresh on every turn so edits by
+    either the human or the agent take effect immediately."""
+    path = paths.agent_dir(slug) / "human.md"
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    return f"── About the human ──\n{text}"
 
 
 def _load_now_block(slug: str) -> str | None:

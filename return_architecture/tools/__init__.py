@@ -13,6 +13,11 @@ from return_architecture.tools.artifact_tools import (
     ArtifactShareMoreTool,
 )
 from return_architecture.tools.tag_item import TagItemTool
+from return_architecture.tools.item_tools import (
+    ListItemsTool,
+    EditItemTool,
+    RemoveItemTool,
+)
 from return_architecture.tools.write_letter import WriteLetterTool
 from return_architecture.tools.private_writings import (
     WritePrivatelyTool,
@@ -41,6 +46,9 @@ BUILTIN_TOOLS: dict[str, Tool] = {
     "artifact_delete_reaction": ArtifactDeleteReactionTool(),
     "artifact_share_more": ArtifactShareMoreTool(),
     "tag_item": TagItemTool(),
+    "list_items": ListItemsTool(),
+    "edit_item": EditItemTool(),
+    "remove_item": RemoveItemTool(),
     "write_letter": WriteLetterTool(),
     "write_privately": WritePrivatelyTool(),
     "list_private_writings": ListPrivateWritingsTool(),

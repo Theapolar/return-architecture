@@ -19,8 +19,9 @@ class TagItemTool(Tool):
         "Record something as a tagged item in this agent's persistent items "
         "store. Use this when you notice something worth tracking — a note "
         "you want to keep, a moment that matters, an open question, or a "
-        "commitment the human (or you) has made. Items can be surfaced later "
-        "by the human via Telegram commands or in scheduled digests."
+        "commitment the human (or you) has made. To place it in one of the "
+        "human's home containers, set kind='note' and tag='idea' (Ideas panel) "
+        "or tag='canvas' (pinned to the Canvas)."
     )
     parameters = {
         "type": "object",
@@ -34,6 +35,10 @@ class TagItemTool(Tool):
                 "type": "string",
                 "description": "The content of the item — a clear, self-contained sentence.",
             },
+            "tag": {
+                "type": "string",
+                "description": "Optional container tag, e.g. 'idea' or 'canvas'.",
+            },
         },
         "required": ["kind", "body"],
     }
@@ -41,6 +46,7 @@ class TagItemTool(Tool):
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolResult:
         kind = (args.get("kind") or "").strip().lower()
         body = (args.get("body") or "").strip()
+        tag = (args.get("tag") or "").strip().lower()
         if kind not in items.KINDS:
             return ToolResult(
                 content=f"Error: kind must be one of {list(items.KINDS)}, got '{kind}'."
@@ -53,7 +59,9 @@ class TagItemTool(Tool):
                 kind=kind,
                 body=body,
                 source="agent",
+                metadata={"tag": tag} if tag else None,
             )
         except ValueError as e:
             return ToolResult(content=f"Error: {e}")
-        return ToolResult(content=f"Tagged as {kind} (id {item_id}).")
+        where = f" in {tag}" if tag else ""
+        return ToolResult(content=f"Tagged as {kind}{where} (id {item_id}).")
