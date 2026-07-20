@@ -165,6 +165,43 @@ def resolve_item(slug: str, item_id: int) -> bool:
         conn.close()
 
 
+def update_item(
+    slug: str,
+    item_id: int,
+    *,
+    body: str | None = None,
+    metadata: dict | None = None,
+) -> bool:
+    """Edit an item's body and/or metadata in place. Returns True if a row changed.
+
+    The store's missing primitive: add/list/resolve/count existed, but not update.
+    Both the human (via the app) and the agent (via a future tool) edit through this.
+    """
+    fields: list[str] = []
+    params: list = []
+    if body is not None:
+        if not body.strip():
+            raise ValueError("Empty body.")
+        fields.append("body = ?")
+        params.append(body.strip())
+    if metadata is not None:
+        fields.append("metadata = ?")
+        params.append(json.dumps(metadata) if metadata else None)
+    if not fields:
+        return False
+    conn = _connect(slug)
+    try:
+        _ensure_schema(conn)
+        params.append(item_id)
+        cur = conn.execute(
+            f"UPDATE items SET {', '.join(fields)} WHERE id = ?", params
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def count_by_kind(slug: str, status: str | None = "open") -> dict[str, int]:
     conn = _connect(slug)
     try:
